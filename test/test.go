@@ -18,6 +18,7 @@ func main() {
 		cls.InitStartWsClient()
 	} else {
 		fmt.Println("cls is nil")
+		return
 	}
 	fmt.Println(cls.GetUserinfo())
 
