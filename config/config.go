@@ -27,13 +27,20 @@ type Config struct {
 	TalkRobotCmd  string   `json:",default=test"`                                // 机器人聊天关键字
 	FuzzyMatchCmd bool     `json:",default=false"`                               // 模糊匹配关键字
 	RobotName     string   `json:",default=花花"`                                  // 机器人名称
-	RobotMode     string   `json:",default=QingYunKe,options=QingYunKe|ChatGPT"` // 机器人服务
+	RobotMode     string   `json:",default=DeepSeek,options=QingYunKe|ChatGPT|DeepSeek"` // 机器人服务
 	ChatGPT       struct { // GPT的配置
 		APIUrl   string `json:",default=https://api.openai.com/v1"`
 		APIToken string `json:",optional"`
 		Prompt   string `json:",default=你是一个非常幽默的机器人助理，可以使用emoji表情符号，可以使用颜文字"`
 		Limit    bool   `json:",default=true"`
 		Model    string `json:",default=gpt-3.5-turbo"`
+	}
+	DeepSeek struct { // DeepSeek的配置
+		APIUrl   string `json:",default=https://api.deepseek.com/v1"`
+		APIToken string `json:",optional"`
+		Prompt   string `json:",default=你是一个非常幽默的机器人助理，可以使用emoji表情符号，可以使用颜文字"`
+		Limit    bool   `json:",default=true"`
+		Model    string `json:",default=deepseek-chat"`
 	}
 
 	// 欢迎配置

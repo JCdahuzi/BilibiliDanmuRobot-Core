@@ -48,13 +48,13 @@ func handleRobotBullet(content entity.Bullet, svcCtx *svc.ServiceContext) {
 	var reply string
 	if svcCtx.Config.RobotMode == "ChatGPT" {
 		if reply, err = http.RequestChatgptRobot(content.Msg, svcCtx); err != nil {
-			logx.Errorf("请求机器人失败：%v", err)
+			logx.Errorf("请求ChatGPT机器人失败：%v", err)
 			PushToBulletSender("不好意思，机器人坏掉了...", content.Reply...)
 			return
 		}
-	} else {
+	} else if svcCtx.Config.RobotMode == "Qingyunke" {
 		if reply, err = http.RequestQingyunkeRobot(content.Msg); err != nil {
-			logx.Errorf("请求机器人失败：%v", err)
+			logx.Errorf("请求Qingyunke机器人失败：%v", err)
 			PushToBulletSender("不好意思，机器人坏掉了...", content.Reply...)
 			return
 		}
@@ -62,6 +62,16 @@ func handleRobotBullet(content entity.Bullet, svcCtx *svc.ServiceContext) {
 		for _, v := range bulltes {
 			PushToBulletSender(v, content.Reply...)
 		}
+		return
+	} else if svcCtx.Config.RobotMode == "DeepSeek" {
+		if reply, err = http.RequestDeepSeekRobot(content.Msg, svcCtx); err != nil {
+			logx.Errorf("请求DeepSeek机器人失败：%v", err)
+			PushToBulletSender("不好意思，机器人坏掉了...", content.Reply...)
+			return
+		}
+	} else {
+		logx.Errorf("未知的机器人模式：%s", svcCtx.Config.RobotMode)
+		PushToBulletSender("不好意思，机器人坏掉了...", content.Reply...)
 		return
 	}
 	PushToBulletSender(reply, content.Reply...)
