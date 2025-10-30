@@ -84,7 +84,7 @@ func NewWsHandler() WsHandler {
 	roominfo, err := http.RoomInit(ctx.Config.RoomId)
 	if err != nil {
 		logx.Error(err)
-		//return nil
+		return nil
 	}
 	ctx.UserID = roominfo.Data.Uid
 	return ws
