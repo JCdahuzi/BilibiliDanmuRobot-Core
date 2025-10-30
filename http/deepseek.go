@@ -29,7 +29,9 @@ func RequestDeepSeekRobot(msg string, svcCtx *svc.ServiceContext) (string, error
 					Content: msg,
 				},
 			},
-			MaxTokens: 75, // 回复长度限制 粗略估算：1个中文汉字 ≈ 2-3个 tokens 限制在30个字左右
+			MaxTokens:   50,  // 回复长度限制 粗略估算：1个中文汉字 ≈ 2-3个 tokens 限制在30个字左右
+			Temperature: 0.5, // 生成文本的随机程度，范围是0到1，值越高，生成的文本越随机
+			// Stream:      true, // 流式响应
 		},
 	)
 	if err != nil {
