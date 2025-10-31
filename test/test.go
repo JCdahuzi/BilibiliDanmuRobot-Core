@@ -3,12 +3,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"time"
+
 	"github.com/xbclub/BilibiliDanmuRobot-Core/config"
 	"github.com/xbclub/BilibiliDanmuRobot-Core/handler"
 	"github.com/zeromicro/go-zero/core/logx"
 	"gopkg.in/yaml.v3"
-	"os"
-	"time"
 )
 
 func main() {
@@ -26,7 +27,6 @@ func main() {
 	x := cls.GetSvc()
 	z := *x.Config
 	z.SignInEnable = false
-	z.RoomId = 4699397
 	z.CronDanmu = false
 	marshal, err := json.Marshal(z)
 	if err != nil {
