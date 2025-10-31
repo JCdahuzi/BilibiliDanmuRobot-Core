@@ -26,5 +26,5 @@ token
 logs
 BilibiliDanmuRobot-Core
 .DS_Store
-db/sqliteDataBase.db
+db/*
 .vscode/launch.json
