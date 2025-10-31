@@ -52,10 +52,6 @@ func handleRobotBullet(content entity.Bullet, svcCtx *svc.ServiceContext) {
 			PushToBulletSender("不好意思，机器人坏掉了...", content.Reply...)
 			return
 		}
-		bulltes := splitRobotReply(reply, svcCtx)
-		for _, v := range bulltes {
-			PushToBulletSender(v, content.Reply...)
-		}
 	} else if svcCtx.Config.RobotMode == "Qingyunke" {
 		if reply, err = http.RequestQingyunkeRobot(content.Msg); err != nil {
 			logx.Errorf("请求Qingyunke机器人失败：%v", err)
@@ -72,10 +68,6 @@ func handleRobotBullet(content entity.Bullet, svcCtx *svc.ServiceContext) {
 			logx.Errorf("请求DeepSeek机器人失败：%v", err)
 			PushToBulletSender("不好意思，机器人坏掉了...", content.Reply...)
 			return
-		}
-		bulltes := splitRobotReply(reply, svcCtx)
-		for _, v := range bulltes {
-			PushToBulletSender(v, content.Reply...)
 		}
 	} else {
 		logx.Errorf("未知的机器人模式：%s", svcCtx.Config.RobotMode)
