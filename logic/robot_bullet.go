@@ -6,7 +6,6 @@ import (
 	"github.com/xbclub/BilibiliDanmuRobot-Core/http"
 	"github.com/xbclub/BilibiliDanmuRobot-Core/svc"
 	"github.com/zeromicro/go-zero/core/logx"
-	"regexp"
 	"strings"
 )
 
@@ -69,6 +68,8 @@ func handleRobotBullet(content entity.Bullet, svcCtx *svc.ServiceContext) {
 			PushToBulletSender("不好意思，机器人坏掉了...", content.Reply...)
 			return
 		}
+		// 处理异常信息
+		reply = handleRobotReply(reply, svcCtx)
 	} else {
 		logx.Errorf("未知的机器人模式：%s", svcCtx.Config.RobotMode)
 		PushToBulletSender("不好意思，机器人坏掉了...", content.Reply...)
@@ -79,15 +80,14 @@ func handleRobotBullet(content entity.Bullet, svcCtx *svc.ServiceContext) {
 
 }
 
+func handleRobotReply(content string, svcCtx *svc.ServiceContext) string {
+	// 处理异常信息
+	return content
+}
+
 // 将机器人回复语句中的 {br} 进行分割
 // b站弹幕一次只能发20个字符，需要切分
 func splitRobotReply(content string, svcCtx *svc.ServiceContext) []string {
-
-	// 将机器人回复中的菲菲替换为橘子
-	content = strings.ReplaceAll(content, "菲菲", svcCtx.Config.RobotName)
-	re, _ := regexp.Compile(`\{face\:.*\}`)
-	content = re.ReplaceAllString(content, "")
-
 	//var res []string
 	reply := strings.Split(content, "{br}")
 
