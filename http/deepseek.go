@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -133,12 +134,23 @@ func buildMessagesWithHistory(svcCtx *svc.ServiceContext) []openai.ChatCompletio
 	// 从文件加载历史记录
 	history := loadHistoryFromFile(roomID)
 
+	// 构建系统提示词
+	systemPrompt := svcCtx.Config.DeepSeek.Prompt
+	systemPrompt += "，说话简明扼要！30字以内！不要截断！" // 强制要求回复长度
+	
+	// 添加屏蔽词提示到系统提示词
+	if len(svcCtx.Config.DeepSeek.BlockedWords) > 0 {
+		systemPrompt += " 请注意避免使用以下屏蔽词: " + strings.Join(svcCtx.Config.DeepSeek.BlockedWords, ", ")
+	}
+	
+	systemMessage := openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleSystem,
+			Content: systemPrompt,
+	}
+
 	// 构建消息列表，包括系统提示词和历史对话
 	messages := make([]openai.ChatCompletionMessage, 0)
-	messages = append(messages, openai.ChatCompletionMessage{
-		Role:    openai.ChatMessageRoleSystem,
-		Content: svcCtx.Config.DeepSeek.Prompt,
-	})
+	messages = append(messages, systemMessage)
 	messages = append(messages, history...)
 
 	return messages
@@ -148,6 +160,13 @@ func buildMessagesWithHistory(svcCtx *svc.ServiceContext) []openai.ChatCompletio
 func updateConversationHistory(roomID int, userMsg, aiReply string, maxHistoryMessages int) {
 	// 获取当前房间的历史对话记录
 	history := loadHistoryFromFile(roomID)
+
+	// 将历史数据中的 user 替换成 assistant，确保角色正确
+	for i, msg := range history {
+		if msg.Role == openai.ChatMessageRoleUser {
+			history[i].Role = openai.ChatMessageRoleAssistant
+		}
+	}
 
 	// 添加用户消息到历史记录
 	history = append(history, openai.ChatCompletionMessage{

@@ -36,12 +36,13 @@ type Config struct {
 		Model    string `json:",default=gpt-3.5-turbo"`
 	}
 	DeepSeek struct { // DeepSeek的配置
-		APIUrl             string `json:",default=https://api.deepseek.com/v1"`
-		APIToken           string `json:",optional"`
-		Prompt             string `json:",default=你是一个非常幽默的机器人助理，可以使用emoji表情符号，可以使用颜文字"`
-		Limit              bool   `json:",default=true"`
-		Model              string `json:",default=deepseek-chat"`
-		MaxHistoryMessages int    `json:",default=100"` // 最大历史记录消息数
+		APIUrl             string   `json:",default=https://api.deepseek.com/v1"`
+		APIToken           string   `json:",optional"`
+		Prompt             string   `json:",default=你是一个非常幽默的机器人助理，可以使用emoji表情符号，可以使用颜文字"`
+		Limit              bool     `json:",default=true"`
+		Model              string   `json:",default=deepseek-chat"`
+		MaxHistoryMessages int      `json:",default=100"`                             // 最大历史记录消息数
+		BlockedWords       []string `json:",default=["色情", "政治", "暴力", "涉政", "希特勒"]"` // 屏蔽词列表
 	}
 
 	// 欢迎配置
