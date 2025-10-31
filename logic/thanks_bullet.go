@@ -132,9 +132,9 @@ func summarizeBlindGift(danmuLen int, svcCtx *svc.ServiceContext) {
 		for blindBoxName, blindBoxMap := range m {
 			//giftstring = append(giftstring, fmt.Sprintf("%d个%s盈亏%+.2f元", blindBoxMap["count"], blindBoxName, float64(blindBoxMap["profit_and_loss"])/1000))
 			if blindBoxMap["profit_and_loss"] > 0 {
-				giftstring = append(giftstring, fmt.Sprintf("%d个%s赚了＋%.2f元", blindBoxMap["count"], blindBoxName, float64(blindBoxMap["profit_and_loss"])/1000))
+				giftstring = append(giftstring, fmt.Sprintf("%d个%s赚了%.2f元", blindBoxMap["count"], blindBoxName, float64(blindBoxMap["profit_and_loss"])/1000))
 			} else {
-				giftstring = append(giftstring, fmt.Sprintf("%d个%s亏了－%.2f元", blindBoxMap["count"], blindBoxName, math.Abs(float64(blindBoxMap["profit_and_loss"])/1000)))
+				giftstring = append(giftstring, fmt.Sprintf("%d个%s亏了%.2f元", blindBoxMap["count"], blindBoxName, math.Abs(float64(blindBoxMap["profit_and_loss"])/1000)))
 			}
 			// 计算打赏金额
 			// 感谢完后立刻清空map
