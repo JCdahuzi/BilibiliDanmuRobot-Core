@@ -304,7 +304,7 @@ func (c *Client) Handle(p packet.Packet) {
 	case packet.HeartBeatResponse:
 	case packet.RoomEnterResponse:
 	default:
-		log.Alert(fmt.Sprintf("protover: %v data: %v unknown protover", p.ProtocolVersion, p.Body))
+		log.Errorf("%s", fmt.Sprintf("protover: %v data: %v unknown protover", p.ProtocolVersion, p.Body))
 	}
 }
 
