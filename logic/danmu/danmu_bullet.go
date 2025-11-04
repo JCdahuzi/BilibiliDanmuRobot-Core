@@ -84,6 +84,8 @@ func StartDanmuLogic(ctx context.Context, svcCtx *svc.ServiceContext) {
 				if svcCtx.Config.KeywordReply {
 					go KeywordReply(danmumsg, svcCtx, reply)
 				}
+				// 点歌功能
+				// go ProcessMusicRequest(danmumsg, svcCtx, reply)
 			}
 			// 签到
 			if svcCtx.Config.SignInEnable {
