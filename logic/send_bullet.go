@@ -56,6 +56,7 @@ func StartSendBullet(ctx context.Context, svcCtx *svc.ServiceContext) {
 			for _, msgs := range msgdata {
 				if err := http.Send(msgs, svcCtx, bullet.Reply...); err != nil {
 					logx.Errorf("弹幕发送失败：%s msg: %s", err, msgs)
+					PushToBulletSender("弹幕发送失败："+err.Error()+" msg: "+msgs, bullet.Reply...)
 				} else {
 					logx.Infof("弹幕发送成功：%s", msgs)
 				}
