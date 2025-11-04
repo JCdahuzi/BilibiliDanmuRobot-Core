@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/xbclub/BilibiliDanmuRobot-Core/entity"
-	"github.com/xbclub/BilibiliDanmuRobot-Core/svc"
-	"github.com/zeromicro/go-zero/core/logx"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/xbclub/BilibiliDanmuRobot-Core/entity"
+	"github.com/xbclub/BilibiliDanmuRobot-Core/svc"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 var danmuHandler *DanmuLogic
@@ -85,7 +86,7 @@ func StartDanmuLogic(ctx context.Context, svcCtx *svc.ServiceContext) {
 					go KeywordReply(danmumsg, svcCtx, reply)
 				}
 				// 点歌功能
-				// go ProcessMusicRequest(danmumsg, svcCtx, reply)
+				go ProcessMusicRequest(danmumsg, svcCtx, reply)
 			}
 			// 签到
 			if svcCtx.Config.SignInEnable {

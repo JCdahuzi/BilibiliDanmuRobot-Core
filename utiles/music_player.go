@@ -2,15 +2,13 @@ package utiles
 
 import (
 	"fmt"
-	"image"
-	"image/color"
 	_ "image/jpeg"
 	_ "image/png"
 	"os"
 	"os/exec"
 	"runtime"
-	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zeromicro/go-zero/core/logx"
@@ -56,13 +54,129 @@ var playerConfigs = map[MusicPlayerType]playerInfo{
 	},
 }
 
-// AddSongToPlaylist 将指定名称的歌曲添加到指定音乐播放器的播放列表
-func AddSongToPlaylist(player MusicPlayerType, songName string) error {
-	if runtime.GOOS != "windows" {
-		logx.Errorf("此功能仅支持 Windows 系统")
-		return fmt.Errorf("此功能仅支持 Windows 系统")
+// PlaySongByBrowser 通过浏览器直接播放指定歌曲
+func PlaySongByBrowser(songName string, artist string) error {
+	// 根据是否提供歌手信息构建搜索关键词
+	searchKeyword := songName
+	if artist != "" {
+		// 当有多个歌手时，将逗号替换为%20
+		if strings.Contains(artist, ", ") || strings.Contains(artist, "， ") {
+			artist = strings.ReplaceAll(artist, ", ", "%20")
+			artist = strings.ReplaceAll(artist, "， ", "%20")
+		}
+		searchKeyword = fmt.Sprintf("%s%%20%s", songName, artist)
 	}
 
+	// 使用QQ音乐网页版的搜索结果页面
+	logx.Infof("打开QQ音乐网页版搜索结果页面: %s", searchKeyword)
+	// 构建QQ音乐网页版搜索URL
+	webSearchURL := fmt.Sprintf("https://y.qq.com/n/ryqq/search?w=%s", searchKeyword)
+	return openURLInBrowser(webSearchURL, searchKeyword)
+}
+
+// openURLInBrowser 在浏览器中打开指定的URL
+func openURLInBrowser(url, searchKeyword string) error {
+	// 通过浏览器打开链接
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
+	case "darwin": // macOS
+		cmd = exec.Command("open", url)
+	case "linux":
+		// 尝试使用常见的浏览器命令
+		browsers := []string{"xdg-open", "google-chrome", "firefox", "opera", "safari"}
+		for _, browser := range browsers {
+			if _, err := exec.LookPath(browser); err == nil {
+				cmd = exec.Command(browser, url)
+				break
+			}
+		}
+		// 如果没有找到浏览器，使用默认的xdg-open
+		if cmd == nil {
+			cmd = exec.Command("xdg-open", url)
+		}
+	default:
+		return fmt.Errorf("不支持的操作系统: %s", runtime.GOOS)
+	}
+
+	// 执行命令打开浏览器
+	if err := cmd.Run(); err != nil {
+		logx.Errorf("打开浏览器失败: %v", err)
+		return fmt.Errorf("打开浏览器失败: %v", err)
+	}
+
+	logx.Infof("已在浏览器中打开歌曲: %s", searchKeyword)
+	return nil
+}
+
+// AddSongToPlaylist 将指定名称的歌曲添加到指定音乐播放器的播放列表
+func AddSongToPlaylist(player MusicPlayerType, songName string) error {
+	// 对于QQ音乐，使用API方式添加歌曲到播放列表
+	if player == QQMusic {
+		// 使用QQ音乐API搜索歌曲
+		api := NewQQMusicAPI()
+		logx.Infof("正在搜索歌曲: %s", songName)
+
+		// 搜索歌曲
+		songs, err := api.SearchSong(songName, 1, 5)
+		if err != nil {
+			logx.Errorf("搜索歌曲失败: %v", err)
+			return fmt.Errorf("搜索歌曲失败: %v", err)
+		}
+
+		if len(songs) == 0 {
+			logx.Errorf("未找到歌曲: %s", songName)
+			return fmt.Errorf("未找到歌曲: %s", songName)
+		}
+
+		// 选择搜索结果中的第一首歌曲
+		targetSong := songs[0]
+		logx.Infof("找到歌曲: %s - %s (专辑: %s)", targetSong.Name, targetSong.Singer, targetSong.Album)
+
+		// 使用本地播放列表功能（如果需要在线播放列表，需要用户认证）
+		// 首先检查是否有名为"机器人播放列表"的本地播放列表
+		var playlist *LocalPlaylist
+		allPlaylists := GetAllLocalPlaylists()
+		playlistExists := false
+
+		for _, pl := range allPlaylists {
+			if pl.Name == "机器人播放列表" {
+				playlist = pl
+				playlistExists = true
+				break
+			}
+		}
+
+		// 如果不存在，则创建一个新的播放列表
+		if !playlistExists {
+			logx.Infof("创建新的本地播放列表: 机器人播放列表")
+			playlist = CreateLocalPlaylist("机器人播放列表", "由机器人自动添加的歌曲集合")
+		}
+
+		// 将歌曲添加到本地播放列表
+		err = AddSongToLocalPlaylist(playlist.ID, targetSong)
+		if err != nil {
+			logx.Errorf("添加歌曲到本地播放列表失败: %v", err)
+			return fmt.Errorf("添加歌曲到本地播放列表失败: %v", err)
+		}
+
+		logx.Infof("成功添加歌曲到本地播放列表 '%s'", playlist.Name)
+
+		// 开启播放列表播放线程（如果未开启）
+		if !playlistPlaybackRunning {
+			logx.Infof("开启播放列表播放线程")
+			err := StartPlaylistPlayback(QQMusic)
+			if err != nil {
+				logx.Errorf("开启播放列表播放线程失败: %v", err)
+				return fmt.Errorf("开启播放列表播放线程失败: %v", err)
+			}
+		}
+
+		return nil
+	}
+
+	// 对于其他播放器类型（如酷狗音乐），继续使用原来的方法
 	return addSongToPlaylist(player, songName)
 }
 
@@ -116,8 +230,170 @@ func PreviousSong(player MusicPlayerType) error {
 	return sendMediaKey("{LEFT}")
 }
 
+// 用于控制播放列表播放线程的变量
+var (
+	playlistPlaybackRunning  bool
+	playlistPlaybackMutex    sync.Mutex
+	playlistPlaybackStopChan chan struct{}
+)
+
+// StartPlaylistPlayback 启动本地播放列表播放线程
+// 该线程会检查本地播放列表（默认使用"机器人播放列表"），播放第一首音乐，
+// 播放完毕后从列表中移除，然后播放下一首，直到列表为空
+func StartPlaylistPlayback(playerType MusicPlayerType) error {
+	playlistPlaybackMutex.Lock()
+	defer playlistPlaybackMutex.Unlock()
+
+	// 检查是否已经在运行
+	if playlistPlaybackRunning {
+		return fmt.Errorf("播放列表播放线程已经在运行")
+	}
+
+	// 创建停止通道
+	playlistPlaybackStopChan = make(chan struct{})
+	playlistPlaybackRunning = true
+
+	logx.Infof("启动本地播放列表播放线程，播放器类型: %s", playerType)
+
+	// 启动播放线程
+	go func() {
+		for {
+			select {
+			case <-playlistPlaybackStopChan:
+				logx.Infof("播放列表播放线程已停止")
+				playlistPlaybackMutex.Lock()
+				playlistPlaybackRunning = false
+				playlistPlaybackMutex.Unlock()
+				return
+			default:
+				// 检查并播放播放列表中的歌曲
+				playNextSongFromPlaylist(playerType)
+
+				// 如果播放列表为空，等待一段时间后再次检查
+				time.Sleep(5 * time.Second)
+			}
+		}
+	}()
+
+	return nil
+}
+
+// StopPlaylistPlayback 停止播放列表播放线程
+func StopPlaylistPlayback() {
+	playlistPlaybackMutex.Lock()
+	defer playlistPlaybackMutex.Unlock()
+
+	if playlistPlaybackRunning && playlistPlaybackStopChan != nil {
+		close(playlistPlaybackStopChan)
+		logx.Infof("请求停止播放列表播放线程")
+	}
+}
+
+// IsPlaylistPlaybackRunning 检查播放列表播放线程是否正在运行
+func IsPlaylistPlaybackRunning() bool {
+	playlistPlaybackMutex.Lock()
+	defer playlistPlaybackMutex.Unlock()
+	return playlistPlaybackRunning
+}
+
+// RemoveSongFromLocalPlaylist 从本地播放列表中移除指定索引的歌曲
+func RemoveSongFromLocalPlaylist(playlistID string, index int) error {
+	playlist, exists := localPlaylists[playlistID]
+	if !exists {
+		return fmt.Errorf("本地播放列表不存在")
+	}
+
+	if index < 0 || index >= len(playlist.Songs) {
+		return fmt.Errorf("歌曲索引超出范围")
+	}
+
+	// 移除歌曲
+	playlist.Songs = append(playlist.Songs[:index], playlist.Songs[index+1:]...)
+	playlist.UpdateTime = time.Now()
+	return nil
+}
+
+// playNextSongFromPlaylist 播放本地播放列表中的下一首歌曲
+func playNextSongFromPlaylist(_ MusicPlayerType) {
+	// 查找"机器人播放列表"
+	var playlist *LocalPlaylist
+	allPlaylists := GetAllLocalPlaylists()
+
+	for _, pl := range allPlaylists {
+		if pl.Name == "机器人播放列表" {
+			playlist = pl
+			break
+		}
+	}
+
+	// 如果没有找到播放列表或播放列表为空，直接返回
+	if playlist == nil || len(playlist.Songs) == 0 {
+		return
+	}
+
+	// 获取第一首歌曲
+	currentSong := playlist.Songs[0]
+	songName := fmt.Sprintf("%s-%s", currentSong.Name, currentSong.Singer)
+	logx.Infof("开始播放歌曲: %s，预计时长: %d秒", songName, currentSong.Duration)
+
+	// 检查是否收到停止信号
+	select {
+	case <-playlistPlaybackStopChan:
+		logx.Infof("播放线程停止，取消歌曲播放")
+		return
+	default:
+		// 继续播放
+	}
+
+	// 使用浏览器播放歌曲
+	err := PlaySongByBrowser(currentSong.Name, currentSong.Singer)
+	if err != nil {
+		logx.Errorf("播放歌曲失败: %v", err)
+		return
+	}
+
+	// 等待歌曲播放完成
+	// 使用歌曲实际时长加5秒的缓冲时间
+	playDuration := time.Duration(currentSong.Duration+5) * time.Second
+	logx.Infof("等待歌曲播放完成，预计等待时间: %v", playDuration)
+
+	// 分阶段等待，以便能够及时响应停止信号
+	totalWait := 0 * time.Second
+	checkInterval := 1 * time.Second
+
+	for totalWait < playDuration {
+		// 检查是否收到停止信号
+		select {
+		case <-playlistPlaybackStopChan:
+			logx.Infof("播放线程停止，取消歌曲播放等待")
+			return
+		case <-time.After(checkInterval):
+			totalWait += checkInterval
+			// 最后一次等待可能需要调整，避免等待过长
+			if totalWait+checkInterval > playDuration {
+				checkInterval = playDuration - totalWait
+			}
+		}
+	}
+
+	// 再次检查停止信号
+	select {
+	case <-playlistPlaybackStopChan:
+		logx.Infof("播放线程停止，取消歌曲播放等待")
+		return
+	default:
+		// 歌曲播放完成，从播放列表中移除
+		logx.Infof("歌曲播放完成，从播放列表中移除: %s", songName)
+		RemoveSongFromLocalPlaylist(playlist.ID, 0)
+	}
+}
+
 // addSongToPlaylist 将指定名称的歌曲添加到播放列表
 func addSongToPlaylist(player MusicPlayerType, songName string) error {
+	if runtime.GOOS != "windows" {
+		logx.Errorf("此功能仅支持 Windows 系统")
+		return fmt.Errorf("此功能仅支持 Windows 系统")
+	}
 	// 检查音乐播放器是否正在运行
 	err := checkMusicPlayerRunning(player)
 	if err != nil {
@@ -127,28 +403,6 @@ func addSongToPlaylist(player MusicPlayerType, songName string) error {
 	config, ok := playerConfigs[player]
 	if !ok {
 		return fmt.Errorf("不支持的音乐播放器类型: %s", player)
-	}
-
-	// 查找窗口标题
-	var windowTitle string
-	for _, title := range config.WindowNames {
-		windowTitle = title
-		break // 使用第一个标题作为示例
-	}
-
-	// 截取窗口截图
-	imagePath, err := captureWindow(windowTitle)
-	if err != nil {
-		// 如果截图失败，回退到启发式方法
-		return addSongToPlaylistFallback(player, songName)
-	}
-	defer os.Remove(imagePath) // 清理临时文件
-
-	// 使用图像分析识别搜索框位置
-	x, y, err := findSearchBoxWithImageAnalysis(imagePath)
-	if err != nil {
-		// 如果图像分析失败，回退到启发式方法
-		return addSongToPlaylistFallback(player, songName)
 	}
 
 	// 构造PowerShell脚本来添加歌曲到播放列表
@@ -191,7 +445,7 @@ func addSongToPlaylist(player MusicPlayerType, songName string) error {
 		[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 		
 		# 设置播放器名称变量
-		$playerName = "QQ音乐"
+		$playerName = "%s"
 		Write-Output "步骤1: 开始查找$playerName窗口..."
 		
 		# 查找音乐播放器窗口（已注释掉）
@@ -213,49 +467,45 @@ func addSongToPlaylist(player MusicPlayerType, songName string) error {
 			Start-Sleep -Milliseconds 1000  # 等待窗口激活
 			
 			Write-Output "步骤4: 获取窗口位置和大小..."
-			Write-Output "[播放功能] 步骤4: 获取窗口位置和大小..."
-			# 获取窗口位置和大小
+			// 获取窗口位置和大小
 			$rect = New-Object RECT
 			[WindowHelper]::GetWindowRect($hwnd, [ref]$rect)
-			Write-Output "[播放功能] 步骤4.1: 窗口位置 - 左: $($rect.Left), 上: $($rect.Top), 右: $($rect.Right), 下: $($rect.Bottom)"
 			Write-Output "步骤4.1: 窗口位置 - 左: $($rect.Left), 上: $($rect.Top), 右: $($rect.Right), 下: $($rect.Bottom)"
 			
 			Write-Output "步骤5: 计算搜索框位置..."
-			Write-Output "[播放功能] 步骤5: 计算搜索框位置..."
-			# 计算搜索框绝对位置
+			// 计算搜索框绝对位置
 			$searchBoxX = $rect.Left + %d
 			$searchBoxY = $rect.Top + %d
-			Write-Output "[播放功能] 步骤5.1: 搜索框位置 - X: $searchBoxX, Y: $searchBoxY"
 			Write-Output "步骤5.1: 搜索框位置 - X: $searchBoxX, Y: $searchBoxY"
 			
 			Write-Output "步骤6: 移动鼠标到搜索框并点击..."
-			# 移动鼠标到搜索框位置并点击
+			// 移动鼠标到搜索框位置并点击
 			[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($searchBoxX, $searchBoxY)
 			Write-Output "步骤6.1: 鼠标已移动到搜索框位置"
 			
-			# 正确的鼠标点击方法：使用Windows API
+			// 正确的鼠标点击方法：使用Windows API
 			[User32]::mouse_event(0x0002, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTDOWN
 			[User32]::mouse_event(0x0004, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTUP
 			Write-Output "步骤6.2: 已执行鼠标左键点击"
 			Start-Sleep -Milliseconds 500
 			
 			Write-Output "步骤7: 发送歌曲名称..."
-			# 发送歌曲名称
-			# 使用变量方式避免%字符被解释为Alt键
-			$songName = "%songName%"
+			// 发送歌曲名称
+			// 使用变量方式避免字符被解释为Alt键
+			$songName = "%s"
 			Write-Output "步骤7.1: 发送的歌曲名称: $songName"
 			[System.Windows.Forms.SendKeys]::SendWait($songName)
 			Write-Output "步骤7.2: 歌曲名称发送完成"
 			Start-Sleep -Milliseconds 500
 			
 			Write-Output "步骤8: 执行搜索..."
-			# 回车执行搜索
+			// 回车执行搜索
 			[System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
 			Write-Output "步骤8.1: 已发送回车键，等待搜索结果..."
 			Start-Sleep -Milliseconds 1500
 			
 			Write-Output "步骤9: 选择并添加歌曲到播放列表..."
-			# 选择第一个结果并添加到播放列表（Shift+Enter）
+			// 选择第一个结果并添加到播放列表（Shift+Enter）
 			[System.Windows.Forms.SendKeys]::SendWait("{DOWN}")
 			Write-Output "步骤9.1: 已选择第一个结果"
 			Start-Sleep -Milliseconds 200
@@ -265,126 +515,7 @@ func addSongToPlaylist(player MusicPlayerType, songName string) error {
 			Write-Output "错误步骤: 窗口查找失败，hwnd为0"
 			throw "错误：未找到" + $playerName + "窗口。请确保" + $playerName + "已启动且窗口标题包含" + $playerName + "。" 
 		}
-	`, windowCheck, x, y, escapedSongName)
-
-	cmd := exec.Command("powershell", "-Command", script)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		logx.Errorf("添加歌曲到播放列表失败: %v, 输出: %s", err, string(output))
-		return fmt.Errorf("添加歌曲到播放列表失败: %v, 输出: %s", err, string(output))
-	}
-
-	return nil
-}
-
-// addSongToPlaylistFallback 回退方案，使用启发式方法定位搜索框
-func addSongToPlaylistFallback(player MusicPlayerType, songName string) error {
-	config, ok := playerConfigs[player]
-	if !ok {
-		return fmt.Errorf("不支持的音乐播放器类型: %s", player)
-	}
-
-	// 构造PowerShell脚本来添加歌曲到播放列表
-	escapedSongName := strings.ReplaceAll(songName, `"`, `""`)
-	windowCheck := buildWindowCheckScript(config.WindowNames)
-
-	script := fmt.Sprintf(`
-			# 显式导入Windows Forms程序集
-			Add-Type -AssemblyName System.Windows.Forms
-			Add-Type -AssemblyName System.Drawing
-			
-			Add-Type @"
-				using System;
-				using System.Runtime.InteropServices;
-				public class WindowHelper {
-				[DllImport("user32.dll")]
-				public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-				[DllImport("user32.dll")]
-				public static extern bool SetForegroundWindow(IntPtr hWnd);
-				[DllImport("user32.dll")]
-				public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-				[DllImport("user32.dll")]
-				public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-				[DllImport("user32.dll")]
-				public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-			}
-			public class User32 {
-			[DllImport("user32.dll")]
-			public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);
-			}
-			public struct RECT {
-				public int Left;
-				public int Top;
-				public int Right;
-				public int Bottom;
-			}
-"@
-		
-		# 设置输出编码为UTF-8
-		[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-		
-		# 设置播放器名称变量
-		$playerName = "QQ音乐"
-		Write-Output "[播放功能] 步骤1: 开始查找$playerName窗口..."
-		
-		# 查找音乐播放器窗口（已注释掉）
-		# %s
-		# 直接设置hwnd为非零值以跳过窗口查找步骤
-		$hwnd = 1
-		Write-Output "[播放功能] 步骤2: 跳过窗口查找，直接设置hwnd值为: $hwnd"
-		
-		if ($hwnd -ne 0) {
-			Write-Output "[播放功能] 步骤3: 开始窗口前置操作..."
-			# 将窗口显示在最前面
-			Write-Output "[播放功能] 步骤3.1: 恢复窗口..."
-			[WindowHelper]::ShowWindow($hwnd, 9)  # SW_RESTORE
-			Write-Output "[播放功能] 步骤3.2: 设置窗口置顶..."
-			[WindowHelper]::SetWindowPos($hwnd, -1, 0, 0, 0, 0, 3)  # HWND_TOPMOST, SWP_NOMOVE | SWP_NOSIZE
-			Write-Output "[播放功能] 步骤3.3: 设置窗口为前台..."
-			[WindowHelper]::SetForegroundWindow($hwnd)
-			Write-Output "[播放功能] 步骤3.4: 等待窗口激活..."
-			Start-Sleep -Milliseconds 1000  # 等待窗口激活
-			
-			# 获取窗口位置和大小
-			$rect = New-Object RECT
-			[WindowHelper]::GetWindowRect($hwnd, [ref]$rect)
-			
-			# 计算搜索框绝对位置（启发式方法）
-			$searchBoxX = $rect.Left + 300
-			$searchBoxY = $rect.Top + 30
-			
-			Write-Output "[播放功能] 步骤6: 移动鼠标到搜索框并点击..."
-			# 移动鼠标到搜索框位置并点击
-			[System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($searchBoxX, $searchBoxY)
-			Write-Output "[播放功能] 步骤6.1: 鼠标已移动到搜索框位置"
-			# 正确的鼠标点击方法：使用Windows API
-			[User32]::mouse_event(0x0002, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTDOWN
-			[User32]::mouse_event(0x0004, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTUP
-			Write-Output "[播放功能] 步骤6.2: 已执行鼠标左键点击"
-			Start-Sleep -Milliseconds 500
-			
-			Write-Output "[播放功能] 步骤7: 发送歌曲名称..."
-			# 发送歌曲名称
-			# 使用变量方式避免%字符被解释为Alt键
-			$songName = "%songName%"
-			Write-Output "[播放功能] 步骤7.1: 发送的歌曲名称: $songName"
-			[System.Windows.Forms.SendKeys]::SendWait($songName)
-			Write-Output "[播放功能] 步骤7.2: 歌曲名称发送完成"
-			Start-Sleep -Milliseconds 500
-			
-			# 回车执行搜索
-			[System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-			Start-Sleep -Milliseconds 1500
-			
-			# 选择第一个结果并添加到播放列表（Shift+Enter）
-			[System.Windows.Forms.SendKeys]::SendWait("{DOWN}")
-			Start-Sleep -Milliseconds 200
-			[System.Windows.Forms.SendKeys]::SendWait("+{ENTER}")
-		} else {
-			Write-Output "[播放功能] 错误步骤: 窗口查找失败，hwnd为0"
-			throw "错误：未找到" + $playerName + "窗口。请确保" + $playerName + "已启动且窗口标题包含" + $playerName + "。" 
-		}
-	`, windowCheck, escapedSongName)
+	`, getPlayerName(player), windowCheck, 0, 0, escapedSongName)
 
 	cmd := exec.Command("powershell", "-Command", script)
 	output, err := cmd.CombinedOutput()
@@ -406,28 +537,6 @@ func searchAndPlaySong(player MusicPlayerType, songName string) error {
 	config, ok := playerConfigs[player]
 	if !ok {
 		return fmt.Errorf("不支持的音乐播放器类型: %s", player)
-	}
-
-	// 查找窗口标题
-	var windowTitle string
-	for _, title := range config.WindowNames {
-		windowTitle = title
-		break // 使用第一个标题作为示例
-	}
-
-	// 截取窗口截图
-	imagePath, err := captureWindow(windowTitle)
-	if err != nil {
-		logx.Errorf("截图失败: %v", err)
-		return fmt.Errorf("截图失败: %v", err)
-	}
-	defer os.Remove(imagePath) // 清理临时文件
-
-	// 使用图像分析识别搜索框位置
-	x, y, err := findSearchBoxWithImageAnalysis(imagePath)
-	if err != nil {
-		logx.Errorf("图像分析搜索框失败: %v", err)
-		return fmt.Errorf("图像分析搜索框失败: %v", err)
 	}
 
 	// 构造PowerShell脚本来搜索和播放歌曲
@@ -501,8 +610,8 @@ func searchAndPlaySong(player MusicPlayerType, songName string) error {
 			Start-Sleep -Milliseconds 500
 			
 			# 发送歌曲名称
-			# 使用变量方式避免%字符被解释为Alt键
-			$songName = "%songName%"
+			# 使用变量方式避免字符被解释为Alt键
+			$songName = "%songName"
 			[System.Windows.Forms.SendKeys]::SendWait($songName)
 			Start-Sleep -Milliseconds 500
 			
@@ -517,7 +626,7 @@ func searchAndPlaySong(player MusicPlayerType, songName string) error {
 		} else {
 			throw "错误：未找到" + $playerName + "窗口。请确保" + $playerName + "已启动且窗口标题包含" + $playerName + "。" 
 		}
-	`, windowCheck, x, y, escapedSongName)
+	`, windowCheck, 0, 0, escapedSongName)
 
 	cmd := exec.Command("powershell", "-Command", script)
 	output, err := cmd.CombinedOutput()
@@ -585,18 +694,18 @@ func checkMusicPlayerRunning(player MusicPlayerType) error {
 		// 尝试启动音乐播放器
 		startErr := startMusicPlayer(player)
 		if startErr != nil {
-		logx.Errorf("%s未运行且无法启动: %v", getPlayerName(player), startErr)
-		return fmt.Errorf("%s未运行且无法启动: %v", getPlayerName(player), startErr)
-	}
+			logx.Errorf("%s未运行且无法启动: %v", getPlayerName(player), startErr)
+			return fmt.Errorf("%s未运行且无法启动: %v", getPlayerName(player), startErr)
+		}
 		// 给播放器一些启动时间
 		time.Sleep(3 * time.Second)
 		// 再次检查进程是否启动成功
 		cmd = exec.Command("powershell", "-Command", script)
 		err = cmd.Run()
 		if err != nil {
-		logx.Errorf("%s启动后仍未检测到进程", getPlayerName(player))
-		return fmt.Errorf("%s启动后仍未检测到进程", getPlayerName(player))
-	}
+			logx.Errorf("%s启动后仍未检测到进程", getPlayerName(player))
+			return fmt.Errorf("%s启动后仍未检测到进程", getPlayerName(player))
+		}
 	}
 
 	return nil
@@ -640,7 +749,7 @@ func buildWindowCheckScript(windowNames []string) string {
 
 	// 构建更灵活的窗口查找逻辑，支持部分匹配
 	script := fmt.Sprintf(`Write-Output "[窗口查找] 尝试通过精确标题查找窗口..."
-		$windowNamesToTry = @("` + strings.Join(windowNames, `", "`) + `")
+		$windowNamesToTry = @("`+strings.Join(windowNames, `", "`)+`")
  	 	Write-Output "[窗口查找] 尝试的窗口标题列表:  $ ($windowNamesToTry -join ', ')"
 		$hwnd = [WindowHelper]::FindWindow($null, "%s")
 		Write-Output "[窗口查找] 尝试标题 '%s'，hwnd = $hwnd"`, windowNames[0], windowNames[0])
@@ -748,468 +857,4 @@ func GetRunningPlayerNames() []string {
 	}
 
 	return runningPlayers
-}
-
-// captureWindow 截取指定窗口的屏幕截图
-func captureWindow(windowTitle string) (string, error) {
-	// 创建临时文件路径存储截图，使用绝对路径并替换特殊字符
-	sanitizedTitle := strings.ReplaceAll(strings.ReplaceAll(windowTitle, "\\", "_"), "/", "_")
-	tempFile := fmt.Sprintf("%s/temp_%s.png", os.TempDir(), sanitizedTitle)
-
-	script := fmt.Sprintf(`
-		# 添加DPI感知设置以处理高DPI显示器
-		Add-Type -TypeDefinition @"
-		using System;
-		using System.Runtime.InteropServices;
-		using System.Drawing;
-		using System.Drawing.Imaging;
-
-		public class WindowCapture {
-			// DPI感知设置
-			[DllImport("user32.dll")]
-			public static extern bool SetProcessDPIAware();
-
-			// 窗口操作函数
-			[DllImport("user32.dll")]
-			public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-			[DllImport("user32.dll")]
-			public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-			[DllImport("user32.dll")]
-			public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdcBlt, int nFlags);
-			[DllImport("user32.dll")]
-			public static extern IntPtr GetWindowDC(IntPtr hWnd);
-			[DllImport("user32.dll")]
-			public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
-		}
-
-		public struct RECT {
-			public int Left;
-			public int Top;
-			public int Right;
-			public int Bottom;
-		}
-"@
-
-		# 设置DPI感知
-		[WindowCapture]::SetProcessDPIAware()
-
-		# 查找窗口
-		$hwnd = [WindowCapture]::FindWindow($null, "%s")
-		if ($hwnd -eq 0) {
-			throw "未找到窗口: %s"
-		}
-
-		# 获取窗口位置和大小
-		$rect = New-Object RECT
-		if (-not [WindowCapture]::GetWindowRect($hwnd, [ref]$rect)) {
-			throw "获取窗口大小失败"
-		}
-
-		$width = $rect.Right - $rect.Left
-		$height = $rect.Bottom - $rect.Top
-
-		# 确保窗口尺寸有效
-		if ($width -le 0 -or $height -le 0) {
-			throw "无效的窗口尺寸: ${width}x${height}"
-		}
-
-		try {
-			# 创建位图
-			$bitmap = New-Object System.Drawing.Bitmap($width, $height)
-			$graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-			$hdc = $graphics.GetHdc()
-
-			# 使用PrintWindow方法（更可靠）
-			$result = [WindowCapture]::PrintWindow($hwnd, $hdc, 0)
-			
-			# 如果PrintWindow失败，尝试使用CopyFromScreen作为后备方案
-			if (-not $result) {
-				Write-Host "PrintWindow失败，尝试使用CopyFromScreen作为后备方案"
-				$graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
-			}
-
-			$graphics.ReleaseHdc($hdc)
-
-			# 确保目录存在
-			$dir = Split-Path -Parent "%s"
-			if (-not (Test-Path $dir)) {
-				New-Item -ItemType Directory -Force -Path $dir | Out-Null
-			}
-
-			# 保存图片
-			$bitmap.Save("%s")
-			Write-Host "截图成功保存到: %s"
-		} catch {
-			throw "截图过程中发生错误: $_"
-		} finally {
-			# 确保资源释放
-			if ($graphics -ne $null) { $graphics.Dispose() }
-			if ($bitmap -ne $null) { $bitmap.Dispose() }
-		}
-	`, windowTitle, windowTitle, tempFile, tempFile, tempFile)
-
-	cmd := exec.Command("powershell", "-Command", script)
-	err := cmd.Run()
-	if err != nil {
-		logx.Errorf("截图失败: %v", err)
-		return "", fmt.Errorf("截图失败: %v", err)
-	}
-
-	return tempFile, nil
-}
-
-// findSearchBoxWithImageAnalysis 使用图像分析识别搜索框位置
-// 使用OCR技术实现搜索框定位
-func findSearchBoxWithImageAnalysis(imagePath string) (int, int, error) {
-	// 打开图像文件
-	file, err := os.Open(imagePath)
-	if err != nil {
-		logx.Errorf("无法打开图像文件: %v", err)
-		return 0, 0, fmt.Errorf("无法打开图像文件: %v", err)
-	}
-	defer file.Close()
-
-	// 解码图像
-	img, _, err := image.Decode(file)
-	if err != nil {
-		logx.Errorf("无法解码图像: %v", err)
-		return 0, 0, fmt.Errorf("无法解码图像: %v", err)
-	}
-
-	// 获取图像边界
-	bounds := img.Bounds()
-	width := bounds.Max.X
-	height := bounds.Max.Y
-	
-	// 创建一个基于OCR的搜索框定位函数
-	ocrSearchBoxX,	 ocrSearchBoxY, err := locateSearchBoxWithOCR(imagePath, width, height)
-	if err == nil && ocrSearchBoxX > 0 && ocrSearchBoxY > 0 {
-		// OCR成功定位到搜索框
-		logx.Info("使用OCR技术成功定位搜索框")
-		return ocrSearchBoxX, ocrSearchBoxY, nil
-	}
-	
-	// OCR定位失败，回退到传统的图像分析方法
-	logx.Info("OCR定位失败，回退到传统图像分析方法")
-	
-	// QQ音乐搜索框特征优化：
-	// 1. 搜索框位于顶部	导航栏，通常在25-60像素高度范围内
-	// 2. 宽度大约占屏幕的1/3到1/2
-	// 3. 具有特定的浅灰色背景
-	// 4. 左侧有搜索图标
-
-	searchMinY := 20
-	searchMaxY := 70
-	searchMinX := width / 4
-	searchMaxX := 3 * width / 4
-
-	var bestX, bestY int = -1, -1
-	maxScore := 0
-
-	// 在更精确的区域内扫描可能的搜索框位置
-	for y := searchMinY; y < searchMaxY; y += 3 {
-		for x := searchMinX; x < searchMaxX; x += 5 {
-			// 检查当前位置是否可能是搜索框的一部分
-			score := analyzeQQMusicSearchBox(img, x, y, bounds, width, height)
-			if score > maxScore {
-				maxScore = score
-				bestX = x
-				bestY = y
-			}
-		}
-	}
-
-	// 如果找到可能的搜索框
-	if bestX != -1 && bestY != -1 {
-		// 确保点击位置在搜索框的中心区域
-		adjustedX := bestX
-		adjustedY := bestY
-		return adjustedX, adjustedY, nil
-	}
-
-	// 根据QQ音乐界面布局，使用更精确的默认位置
-	// 搜索框通常位于顶部导航栏中间位置
-	defaultY := 38 // 更符合QQ音乐搜索框的垂直位置
-	defaultX := - 70 // 调整为更居中的位置，不再偏左
-	return defaultX, defaultY, nil
-}
-
-// analyzeQQMusicSearchBox 针对QQ音乐界面优化的搜索框分析函数
-func analyzeQQMusicSearchBox(img image.Image, x, y int, bounds image.Rectangle, width, height int) int {
-	// 检查边界
-	if x < width/5 || y < 15 || x > 4*width/5 || y > 80 {
-		return 0
-	}
-
-	score := 0
-
-	// 获取中心点颜色
-	centerColor := img.At(x, y)
-
-	// 检查是否为QQ音乐搜索框特有的浅灰色背景
-	r, g, b, _ := centerColor.RGBA()
-	r8 := uint8(r >> 8)
-	g8 := uint8(g >> 8)
-	b8 := uint8(b >> 8)
-
-	// QQ音乐搜索框背景色特征检测
-	// 通常是浅灰色，但不是纯白
-	luminance := 0.299*float64(r8) + 0.587*float64(g8) + 0.114*float64(b8)
-	if luminance >= 180 && luminance <= 230 {
-		// 检查是否为灰色（RGB值相近）
-		maxRGB := max(max(r8, g8), b8)
-		minRGB := min(min(r8, g8), b8)
-		if maxRGB-minRGB <= 20 {
-			score += 50 // 高分数，因为这是QQ音乐搜索框的主要特征
-		}
-	}
-
-	// 检查搜索框的矩形形状特征
-	// 检查水平方向的一致性（搜索框通常很宽）
-	horizontalConsistent := true
-	for i := -50; i <= 50; i++ {
-		if x+i >= 0 && x+i < bounds.Max.X {
-			neighborColor := img.At(x+i, y)
-			if isColorDifferent(centerColor, neighborColor) {
-				horizontalConsistent = false
-				break
-			}
-		}
-	}
-
-	if horizontalConsistent {
-		score += 30
-	}
-
-	// 检查垂直方向的一致性（搜索框高度固定）
-	verticalConsistent := true
-	for i := -5; i <= 5; i++ {
-		if y+i >= 0 && y+i < bounds.Max.Y {
-			neighborColor := img.At(x, y+i)
-			if isColorDifferent(centerColor, neighborColor) {
-				verticalConsistent = false
-				break
-			}
-		}
-	}
-
-	if verticalConsistent {
-		score += 20
-	}
-
-	// 检查上方是否为导航栏蓝色区域
-	if y-20 >= 0 {
-		topColor := img.At(x, y-20)
-		topR, topG, topB, _ := topColor.RGBA()
-		topR8 := uint8(topR >> 8)
-		topG8 := uint8(topG >> 8)
-		topB8 := uint8(topB >> 8)
-		
-		// QQ音乐顶部导航栏通常是蓝色调
-		totalBrightness := int(topR8) + int(topG8) + int(topB8)
-		if topB8 > topR8+30 && topB8 > topG8+30 && totalBrightness > 400 {
-			score += 15
-		}
-	}
-
-	// 检查左侧是否有搜索图标（暗灰色）
-	if x-30 >= 0 {
-		leftColor := img.At(x-30, y)
-		leftR, leftG, leftB, _ := leftColor.RGBA()
-		leftR8 := uint8(leftR >> 8)
-		leftG8 := uint8(leftG >> 8)
-		leftB8 := uint8(leftB >> 8)
-		
-		// 搜索图标通常是暗灰色
-		if leftR8 >= 100 		&& leftR8 <= 150 && leftG8 >= 100 && leftG8 <= 150 && leftB8 >= 100 && leftB8 <= 150 {
-			score += 15
-		}
-	}
-	
-	// 新增：检查右侧是否有搜索按钮（通常是蓝色），这有助于更准确地	定位搜索框中心
-	if x+150 < bounds.Max.X { // 搜索框右侧大约150像素的位置可能有搜索按钮
-		rightColor := img.At(x+150, y)
-		rightR, rightG, rightB, _ := rightColor.RGBA()
-		rightR8 := uint8(rightR >> 8)
-		rightG8 := uint8(rightG >> 8)
-		rightB8 := uint8(rightB >> 8)
-		
-		// 搜索按钮通常是蓝色或带有蓝色特征
-		if rightR8 >= rightG8 && rightB8 > rightR8 && rightB8 > rightG8 && rightB8 > 150 {
-			score += 25 // 给右侧搜索按钮更高的权重，帮助定位搜索框中心
-		}
-	}
-	
-	// 新增：位置评分优化 - 更倾向于选择搜索框的中心位置而	不是左侧
-	// 计算当前位置与窗口中心的距离
-	windowCenterX := width / 2
-	distanceToCenter := abs(x - windowCenterX)
-	// 距离中心越近，额外加分越多
-	if distanceToCenter < 100 {
-		score += (100 - distanceToCenter) / 10 // 最多加10分
-	}
-
-
-	return score
-}
-
-// 辅助函数：获取三个值中的最大值
-func max(a, b uint8) uint8 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-// 辅助函数：获取三个值中的最小值
-func min(a, b uint8) uint8 {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// analyzeSearchBoxArea 分析指定区域是否可能是搜索框（保留原函数兼容性）
-func analyzeSearchBoxArea(img image.Image, x, y int, bounds image.Rectangle) int {
-	// 为了兼容性，调用新的优化函数
-	width := bounds.Max.X
-	height := bounds.Max.Y
-	return analyzeQQMusicSearchBox(img, x, y, bounds, width, height)
-}
-
-// isLightColor 判断颜色是否为浅色
-func isLightColor(r, g, b uint8) bool {
-	// 计算亮度: (0.299*R + 0.587*G + 0.114*B)
-	luminance := 0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)
-	return luminance > 200 // 阈值可根据需要调整
-}
-
-// isColorDifferent 判断两个颜色是否不同
-func isColorDifferent(c1, c2 color.Color) bool {
-	r1, g1, b1, _ := c1.RGBA()
-	r2, g2, b2, _ := c2.RGBA()
-
-	diff := abs(int(r1>>8)-int(r2>>8)) +
-		abs(int(g1>>8)-int(g2>>8)) +
-		abs(int(b1>>8)-int(b2>>8))
-
-	return diff > 50 // 阈值可根据需要调整
-}
-
-// isColorVeryDifferent 判断两个颜色是否明显不同
-func isColorVeryDifferent(c1, c2 color.Color) bool {
-	r1, g1, b1, _ := c1.RGBA()
-	r2, g2, b2, _ := c2.RGBA()
-
-	diff := abs(int(r1>>8)-int(r2>>8)) +
-		abs(int(g1>>8)-int(g2>>8)) +
-		abs(int(b1>>8)-int(b2>>8))
-
-	return diff > 100 // 高阈值
-}
-
-// abs 计算绝对值
-func abs(x int) int {
-	if x < 0 {
-		return -x
-	}
-	return x
-}
-
-// locateSearchBoxWithOCR 使用OCR技术定位搜索框
-// 注意：此函数需要安装Tesseract OCR和gosseract库
-func locateSearchBoxWithOCR(imagePath string, width, height int) (int, int, error) {
-	// 方法1: 使用exec调用tesseract命令行工具（不需要额外Go依赖）
-	// 这里采用命令行方式以避免引入新的依赖
-	
-	// 创建临时文件保存OCR结果
-	resultFile	, err := os.CreateTemp("", "ocr_result_")
-	if err != nil {
-		logx.Errorf("创建临时文件失败: %v", err)
-		return 0, 0, fmt.Errorf("创建临时文件失败: %v", err)
-	}
-	resultPath := resultFile.Name()
-	resultFile.Close()
-	defer os.Remove(resultPath)
-	
-	// 调用tesseract命令行工具，提取坐标信息
-		cmd := exec.Command("tesseract", imagePath, resultPath[:len(resultPath)-4], "makebox")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		logx.Errorf("Tesseract OCR执行失败: %v, 输出: %s", err, string(output))
-		return 0, 0, fmt.Errorf("Tesseract OCR执行失败: %v, 输出: %s", err, string(output))
-	}
-	
-	// 读取tesseract生成的box文件
-	boxData, err := os.ReadFile(resultPath + ".box")
-	if err != nil {
-		logx.Errorf("读取OCR结果文件失败: %v", err)
-		return 0, 0, fmt.Errorf("读取OCR结果文件失败: %v", err)
-	}
-	
-	// 解析box文件，寻找搜索相关文字
-	lineLines := strings.Split(string(boxData), "\n")
-	searchKeywords := []string{"搜索", "search", "查找", "find", "搜索框", "搜索栏"}
-	
-	var searchBoxX, searchBoxY int
-	bestMatchScore := 0
-	
-	for _, line := range lineLines {
-		if line == "" {
-			continue
-		}
-		
-		// 解析box文件格式: 字符 x y		 width height
-		parts := strings.Fields(line)
-		if len(parts) < 6 {
-			continue
-		}
-		
-		char := parts[0]
-				// 检查是否包含搜索关键词
-		for _, keyword := range searchKeywords {
-			if strings.Contains(strings.ToLower(keyword), strings.ToLower(char)) {
-				// 尝试解析坐标
-				x, errX := strconv.Atoi(parts[1])
-				y, errY := strconv.Atoi(parts[2])
-				boxWidth, errW := strconv.Atoi(parts[3])
-				boxHeight, errH := strconv.Atoi(parts[4])
-				
-				if errX == nil && errY == nil && errW == nil && errH == nil {
-					// 计算搜索框中心位置（在识别到的文字下方或旁边）
-					// 假设搜索框在搜索文字右侧或下方
-					candidateX := x + boxWidth + 20 // 右侧20像素
-					candidateY := y + boxHeight/2
-					
-					// 验证坐标是否在有效范围内
-					if candidateX > 0 && candidateX < width && candidateY > 0 && candidateY < height {
-						// 计算匹配分数（根据关键词匹配长度和位置合理性）
-						score := len(keyword)
-						// 优先选择顶部区域的匹配
-						if candidateY < height/4 {
-							score += 10
-						}
-						// 优先选择中间区域的匹配
-						if candidateX > width/4 && candidateX < 3*width/4 {
-							score += 5
-						}
-						
-												if score > bestMatchScore {
-							bestMatchScore = score
-							searchBoxX = candidateX
-							searchBoxY = candidateY
-						}
-					}
-				}
-			}
-		}
-	}
-	
-	// 	如果找到了搜索框位置
-	if bestMatchScore > 0 {
-		return searchBoxX, searchBoxY, nil
-	}
-	
-	logx.Errorf("OCR未能识别到搜索框")
-	return 0, 0, fmt.Errorf("OCR未能识别到搜索框")
 }
