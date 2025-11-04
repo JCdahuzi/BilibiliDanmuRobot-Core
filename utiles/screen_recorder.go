@@ -151,7 +151,7 @@ func StartSpecificWindowRecording(windowTitle string) error {
 		if ($hwnd -ne 0) {
 			[WindowHelper]::SetForegroundWindow($hwnd)
 			Start-Sleep -Milliseconds 500
-			[WindowHelper]::SendKeys("^{%{r}}")
+			[WindowHelper]::SendKeys("^(%%{r})")
 		} else {
 			throw "未找到窗口: %s"
 		}
