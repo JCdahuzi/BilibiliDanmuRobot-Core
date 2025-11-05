@@ -74,7 +74,7 @@ func StartDanmuLogic(ctx context.Context, svcCtx *svc.ServiceContext) {
 					card = cardInfo[1].(string)
 				}
 			}
-			if len(danmumsg) > 0 && uid != svcCtx.RobotID {
+			if len(danmumsg) > 0 {
 				// 机器人相关
 				go DoDanmuProcess(danmumsg, svcCtx, reply)
 				// 弹幕统计
@@ -86,7 +86,7 @@ func StartDanmuLogic(ctx context.Context, svcCtx *svc.ServiceContext) {
 					go KeywordReply(danmumsg, svcCtx, reply)
 				}
 				// 点歌功能
-				go ProcessMusicRequest(danmumsg, svcCtx, reply)
+				// go ProcessMusicRequest(danmumsg, svcCtx, reply)
 			}
 			// 签到
 			if svcCtx.Config.SignInEnable {
