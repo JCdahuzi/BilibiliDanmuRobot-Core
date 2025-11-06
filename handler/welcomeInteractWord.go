@@ -40,6 +40,9 @@ func (w *wsHandler) welcomeInteractWord() {
 					!in(interact.Data.Uname, w.svc.Config.WelcomeBlacklist) {
 					if w.svc.Config.InteractWordByTime {
 						msg := handleInterractByTime(interact.Data.Uid, welcomeInteract(interact.Data.Uname), w.svc)
+						if len(msg) == 0 {
+							return
+						}
 						logx.Debug(msg)
 						logic.PushToInterractChan(&logic.InterractData{
 							Uid: interact.Data.Uid,
@@ -47,6 +50,9 @@ func (w *wsHandler) welcomeInteractWord() {
 						})
 					} else {
 						msg := handleInterract(interact.Data.Uid, welcomeInteract(interact.Data.Uname), w.svc)
+						if len(msg) == 0 {
+							return
+						}
 						ms := strings.Split(msg, "\n")
 						if len(ms) > 1 {
 							for i, s := range ms {
@@ -184,6 +190,9 @@ func handleInterractByTime(uid int64, uname string, svcCtx *svc.ServiceContext) 
 	}
 }
 func handleInterract(uid int64, uname string, svcCtx *svc.ServiceContext) string {
+	if len(uname) == 0 {
+		return ""
+	}
 	s := []rune(uname)
 	r := "{user}"
 	rep := r + "\n"
