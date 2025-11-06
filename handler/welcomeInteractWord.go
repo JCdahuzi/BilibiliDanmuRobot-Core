@@ -184,6 +184,9 @@ func handleInterractByTime(uid int64, uname string, svcCtx *svc.ServiceContext) 
 	}
 }
 func handleInterract(uid int64, uname string, svcCtx *svc.ServiceContext) string {
+	if len(uname) == 0 {
+		return ""
+	}
 	s := []rune(uname)
 	r := "{user}"
 	rep := r + "\n"
